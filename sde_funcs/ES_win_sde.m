@@ -119,18 +119,35 @@ function [E,MM,PP,MS,PS] = ES_win_sde(theta,param)
     end
     steps = size(mind,2);
     
+     cte = sqrt(2/theta(1));
+     indcof = model_param.N + 1:model_param.N + model_param.D;
+     cof = theta(indcof);
+     w = (-1).^((1:model_param.D) - 1.);
+%     theta(indcof) = b*theta(indcof);
+    
     % LTI SDE model parameters
     model = feval(model_func,theta,model_param,0);
     F  = model.F;
     G  = model.G;
     Qc = model.Qc;
-    H  = model.H;
+    par = struct;
     if isfield(model,'w'),
-        par.H = model.H;
         par.w = model.w;
+        par.H = model.H;
+        par.L = model.L;
+        par.Nb = model.Nb;
     else
-        par = H;
+        par.H = model.H;
     end
+    
+    b = model.Gain*cte*(cof*w')  
+    
+    par.nout = param.model_param.N;
+    par.nlf = param.model_param.R;
+    par.incInput = param.model_param.incInput;
+    par.g_func = param.g_func;
+    par.dg_func = param.dg_func;
+    
     if isempty(M0)
         M0 = model.M0;
     end
@@ -154,6 +171,9 @@ function [E,MM,PP,MS,PS] = ES_win_sde(theta,param)
     M = M0;
     P = P0;
 
+    gf = @(x,par) nl_func(x,par,1);
+    Gf = @(x,par) nl_func(x,par,2);    
+    
     MM = zeros(size(M,1),steps*isteps);
     PP = zeros(size(M,1),size(M,1),steps*isteps);
     
@@ -173,7 +193,7 @@ function [E,MM,PP,MS,PS] = ES_win_sde(theta,param)
             try
                 %[m,P,K,IM,S,LLH]= kf_update(m,P,Y(:,mc),H,R);
                 %[M,P,K,IM,S]= kf_update(M,P,Y(:,mc),H,R);
-                [M,P,~,IM,S]= ekf_update1(M,P,Y(:,mc),param.Gf,R*eye(1),param.gf,[],par);
+                [M,P,~,IM,S]= ekf_update1(M,P,Y(:,mc),Gf,R,gf,[],par);
             catch
                 theta
                 error('Error in update (probably in cholesky)')

@@ -120,6 +120,13 @@ function DE = DE_win_sde(theta,param)
     end
     steps = length(mind);
     
+%     cte = sqrt(2/theta(1));
+%     indcof = model_param.N + 1:model_param.N + model_param.D;
+%     cof = theta(indcof);
+%     w = (-1).^((1:model_param.D) - 1.);
+%     b = .5/(cte*cof*w');
+%     theta(indcof) = b*theta(indcof);    
+    
     model = feval(model_func,theta,model_param,1);
     F   = model.F;
     G   = model.G;
@@ -140,9 +147,9 @@ function DE = DE_win_sde(theta,param)
     par.nlf = param.model_param.R;
     par.incInput = param.model_param.incInput;
     par.g_func = param.g_func;
-    par.dg_dx_func = param.dg_dx_func;
-    par.g_u = param.g_u;
-    par.g_u2 = param.g_u2;
+    par.dg_func = param.dg_func;
+    par.g_u = param.dg_func;
+    par.g_u2 = param.d2g_func;
 
     % dH(theta)
     if isfield(model,'DH')    

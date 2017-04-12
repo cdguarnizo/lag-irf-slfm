@@ -107,18 +107,27 @@ function E = NE_win_sde(theta,param)
     end
     steps = size(mind,2);
     
+    cte = sqrt(2/theta(1));
+    indcof = model_param.N + 1:model_param.N + model_param.D;
+    cof = theta(indcof);
+    w = (-1).^((1:model_param.D) - 1.);
+    b = .5/(cte*cof*w');
+    theta(indcof) = b*theta(indcof);
+    
     % LTI SDE model parameters
-    model = feval(model_func,theta,model_param,0);
+    model = feval(model_func,theta(1:param.model_nparams),model_param,0);
     F  = model.F;
     G  = model.G;
     Qc = model.Qc;
-    
-    if isfield(model,'w'),
-        par.w = model.w;
-        par.H = model.H;
-    else
-        par.H = model.H;
-    end
+
+    par = param.nl_par;
+    par.nout = param.model_param.N;
+    par.nlf = param.model_param.R;
+    par.incInput = param.model_param.incInput;
+    par.w = theta(param.model_nparams+1:end);
+    par.H = model.H;
+    par.g_func = param.g_func;
+    par.dg_func = param.dg_func;
     
     if isempty(M0)
         M0 = model.M0;
@@ -142,8 +151,10 @@ function E = NE_win_sde(theta,param)
     E = E_prior;
     M = M0;
     P = P0;
-    par.H = model.H;
-    par.w = model.w;
+    
+    gf = @(x,par) nl_func(x,par,1);
+    Gf = @(x,par) nl_func(x,par,2);
+    
     for k = 1:steps
         if k > start_ind
             if isempty(G) || isempty(U)
@@ -159,8 +170,9 @@ function E = NE_win_sde(theta,param)
             Rt = R(flag,flag);
             par.flag = flag;
             
-            [M,P,~,IM,S]= ekf_update1(M,P,Y(:,mc),param.Gf,R*eye(1),param.gf,[],par);
-            E = E + 0.5*log(det(2*pi*S))+0.5*(Y(:,mc)-IM)'/S*(Y(:,mc)-IM);
+            %[M,P,~,IM,S]= ekf_update1(M,P,Y(:,mc),param.Gf,R*eye(1),param.gf,[],par);
+            [M,P,~,IM,S]= ekf_update1(M,P,Yt,Gf,Rt,gf,[],par);
+            E = E + 0.5*log(det(2*pi*S))+0.5*(Yt-IM)'/S*(Yt-IM);
             mc = mc + 1;
         end
     end

@@ -1,15 +1,21 @@
-% Demonstration of Inpulse response estimation on a LTI system with Kalman
-% filtering and smoothing.
+% Demonstration of Laguerre latent foce inference with Kalman
+% filtering and smoothing on Wiener System with unknown static nonlinear 
+% function.
 % 
 % The model for i = 1,...,N outputs is
 % 
-% y(t) = \int h(t-tau) u(tau) dtau,
+% f(t) = \int h(t-tau) u(tau) dtau,
+%
+% y(t) = g(f(t))
 % 
-% where the input function u(t) has a GP prior (augmented as a part of the
+% where the input function u(t) has GP prior (augmented as a part of the
 % joint state-space model). The impulse response h(t) is approximated by
 % Laguerre orthonormal functions as
 %
-% h(t) = \sum_{n=1}^N c_n l_n(t) 
+% h(t) = \sum_{n=1}^N c_n l_n(t),
+%
+% and the staitc nonlinear function g() is estimated using a Regularized
+% Basis Function Expansion.
 %
 % Copyright (C) 2016 Cristian Guarnizo
 % Based on codes from Simo Sarkka, Jounin Hartikainen and Arno Solin
@@ -23,9 +29,10 @@ clear
 close all
 warning off
 %add to the path lfm and Laguerre model folders
-addpath(genpath('../lfm'),'../model');
+addpath(genpath('../lfm'),'../model','../sde_funcs');
 
-load('/datasets/data2nd_ex1.mat')
+load('../datasets/data_ex1.mat')
+y = exp(y); %Application of nonlinear function
 Y = [y';uq'];
 
 % Number of time steps in the time series
@@ -41,7 +48,7 @@ t_max = max(t);
 dt = t(2)-t(1);
 tgrid = linspace(t_min,t_max,steps);
 
-%% Construction of LFM
+%% Construction of Laguerre model
 
 % Should the parameters be optimized
 do_optim = 1;
@@ -50,6 +57,16 @@ do_optim = 1;
 N = 1;
 % Number of coefficients
 D = 10;
+
+%Parameters and definitions for approx. g()
+% For each ouput we should have L_d, l_d, s_d
+L = 4;
+Nb = 10;
+ell = 1; %GP lenghtscale
+sf = 1; %GP variance
+S_eq = @(sf,ell,Nb) sf*sqrt(2*pi.*ell.^2)*exp(-.5*(ell*pi*(1:Nb)/(2*L)).^2);
+S = S_eq(sf,ell,Nb);
+
 % Prior covariance for the outputs 
 P0x = 1e-3*eye(N*D);
 
@@ -115,8 +132,10 @@ elseif ki == 2
     w0_lf = zeros(size(theta_lf));
     w0_lf(2) = -3;
 end
+
+% Additional parameters for lag_model
 param.incInput = true;
-param.fixS = true;
+% Additional parameters for np nl
 
 Rtr = diag((0.01*var(Y')));
 
@@ -125,12 +144,14 @@ Rtr = diag((0.01*var(Y')));
 % ind_t = tgrid>3. & tgrid<5.;
 % Y(2,ind_t) = NaN;
 
-% Randomize the ODE parameters
-%Ct = rand(N,1);     %gamma
-%Kt = rand(N,D);    %coefficient
-%St = ones(N,nlf); %sensitivities
+%ell = 1; %GP lenghtscale
+%sf = 2; %GP variance
 
-w0 =randn(N + D*N + N*nlf,1);
+%lambda = pi*in/(2*L);
+%S_eq = sf*sqrt(2*pi.*ell.^2)*exp(-.5*(ell*lambda).^2);
+%Wt = sqrt(S_eq)'.*randn(Nb,1);
+
+w0 =randn(N + D*N,1);
 w0 = [w0;w0_lf];
 
 %Y(1,80:120) = NaN;
@@ -164,13 +185,33 @@ e_param.n_param     = [];
 e_param.dt          = dt;
 e_param.ltr_ind     = ltr_ind;
 
+% Defining nonlinear static function at output
+e_param.g_func = @(x, param) (param.L^(-1/2)*sin( pi*(1:param.Nb)*(x...
+    + param.L)/(2*param.L) )) * param.w(:);
+e_param.dg_func = @(x, param)  param.L^(-1/2)*( cos( pi*(1:param.Nb)*(x + ...
+    param.L)/(2*param.L) ).*(pi*(1:param.Nb)/(2*param.L)) )*param.w(:);
+e_param.d2g_func = @(x, param)  param.L^(-1/2)*( -sin( pi*(1:param.Nb)*...
+    (x + L)/(2*L) ).*(pi*(1:param.Nb)/(2*param.L)).^2 )*param.w(:);
+
+e_param.nl_par = struct;
+e_param.nl_par.Nb = Nb;
+e_param.nl_par.L = L;
+e_param.model_nparams = length(w0);
+w0 = [w0;randn(Nb,1)];
+
 % Prior for thetas
 theta_prior = cell(1,length(w0));
 
-for i = 1:length(w0)
+for i = 1:e_param.model_nparams,
     theta_prior{i} = prior_t;
     %theta_prior{i}.s2 = .3;
 end
+
+% Prior for weights of NP approx of g(H*X)
+for i = 1:Nb,
+    theta_prior{e_param.model_nparams+i} = prior_gaussian('s2',S(i));
+end
+
 e_param.e_prior = theta_prior;
 
 %% MAP optimization of parameters 
@@ -181,8 +222,8 @@ e_param.e_prior = theta_prior;
 % Function handles to energy function and its derivative
 
 % With fixed noise variance
-e_func = @(w) E_lti_sde(w,e_param);
-eg_func = @(w) DE_lti_sde(w,e_param);
+e_func = @(w) NE_win_sde(w,e_param);
+eg_func = @(w) NDE_win_sde(w,e_param);
 
 mydeal = @(varargin)varargin{1:nargout};
 
@@ -206,7 +247,7 @@ isteps = 5;
 tgrid2 = linspace(t_min,t_max,steps*isteps);
 e_param2 = e_param;
 e_param2.isteps = isteps;
-[E2,MM2,PP2,MS2,PS2] = ES_lti_sde(w_opt,e_param2);
+[E2,MM2,PP2,MS2,PS2] = NES_win_sde(w_opt,e_param2);
 
 %% Plotting estimates of output signals
 color1 = [0.7 0.7 0.7];
@@ -214,19 +255,25 @@ color2 = [1 0 0];
 color3 = [0 1 0];
 xx = tgrid'+dt;
 xx2 = tgrid2'+dt./isteps;
-
-model = feval(model_func,theta_opt,param,0);
-
-H = model.H;
-
 nisteps = steps*isteps;
-MS2fi = H*MS2;
 
+model = feval(model_func,theta_opt(1:e_param.model_nparams),param,0);
+
+par.w = theta_opt(e_param.model_nparams+1:end);
+par.L = L;
+par.Nb = Nb;
+
+MS2fi = model.H*MS2;
+xmin = min(MS2fi(1,:));
+xmax = max(MS2fi(1,:));
+for k = 1:size(MS2fi,2),
+    MS2fi(:,k) = e_param.g_func(MS2fi(1:e_param.model_param.N,k),par);
+end
 PS2fi = zeros(N,nisteps);
 
 for i1 = 1:N
     for i = 1:size(PS2,3)
-        PS2fi(i1,i) = H(i1,:)*PS2(:,:,i)*H(i1,:)';
+        PS2fi(i1,i) = model.H(i1,:)*PS2(:,:,i)*model.H(i1,:)';
     end
 end
 
@@ -236,10 +283,10 @@ for i = 1:N
         fliplr((MS2fi(i,:)-1.96*sqrt(PS2fi(i,:))))], color1, 'edgecolor',color1);
     hold on
     
-    h1=plot(xx2,MS2fi(i,:),'--k','LineWidth',1);
+    h1 = plot(xx2,MS2fi(i,:),'--k','LineWidth',1);
     h3 = plot(xx(mind==1),y','.r','LineWidth',1);
     h2 = plot(xx(mind==1),Y(i,:),'.k','LineWidth',1);
-    title(sprintf('Smoothed estimate of output %d',i))
+    %title(sprintf('Smoothed estimate of output %d',i))
     if i == N
         legend([h1,h2],'MAP parameters','True parameters')
     end
@@ -278,7 +325,7 @@ for i = 1:nmodels
         h2 = plot(xx,model.Hi{i}*X,'-r','LineWidth',1);
     end
     
-    title(sprintf('Smoothed estimate of force %d',i))
+    %title(sprintf('Smoothed estimate of force %d',i))
     if i == nmodels
         legend([h1,h2],'MAP parameters','True parameters')
     end
@@ -309,4 +356,15 @@ for d=1:N,
     hold on
     h2 = plot(tgrid,hres(d,:),'.k','LineWidth',1);
 end
-legend([h1,h2],'MAP IRF','True IRF')
+legend([h2,h1],'MAP IRF','True IRF')
+
+x = xmin:(xmax-xmin)/100:xmax;
+fx = x;
+for k = 1:length(x),
+    fx(k) = e_param.g_func(x(k),par);
+end
+
+figure
+plot(x,fx)
+hold on
+plot(x,exp(x),'--r')

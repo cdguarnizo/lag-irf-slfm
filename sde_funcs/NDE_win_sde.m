@@ -51,11 +51,6 @@ function DE = NDE_win_sde(theta,param)
     R           = param.R;           % Measurement noise covariance (matrix or function returning matrix)
 %    H           = param.H;           % Measurement matrix (matrix or function returning matrix)
     dt          = param.dt;          % Time step between measurements
-    
-    gf          = param.gf;          % Function to evaluate g(HM)
-    Gf          = param.Gf;          % Function to evaluate G_x(HM)
-    g_u         = param.g_u;         % Function to evaluate first derivative
-    g_u2        = param.g_u2;        % Function to evaluate second derivative
 
     % Parameters of R if it's a function
     if isfield(param,'n_param')
@@ -120,21 +115,39 @@ function DE = NDE_win_sde(theta,param)
     end
     steps = length(mind);
     
-    model = feval(model_func,theta,model_param,1);
+    cte = sqrt(2/theta(1));
+    indcof = model_param.N + 1:model_param.N + model_param.D;
+    cof = theta(indcof);
+    w = (-1).^((1:model_param.D) - 1.);
+    b = .5/(cte*cof*w');
+    theta(indcof) = b*theta(indcof);
+    
+    model = feval(model_func,theta(1:param.model_nparams),model_param,1);
     F   = model.F;
     G   = model.G;
     Qc  = model.Qc;
     DF  = model.DF;
-    Dw  = model.Dw;
     DG  = model.DG;
     DQc = model.DQc;
     H = model.H;
+
     
-    if isfield(model,'w'),
-        par.w = model.w;
-        par.H = model.H;
-    else
-        par.H = model.H;
+    
+    par = param.nl_par;
+    par.nout = param.model_param.N;
+    par.nlf = param.model_param.R;
+    par.incInput = param.model_param.incInput;
+    par.w = theta(param.model_nparams+1:end);
+    par.H = model.H;
+    par.g_func = param.g_func;
+    par.dg_func = param.dg_func;
+    par.g_u = param.dg_func;
+    par.g_u2 = param.d2g_func;
+    
+    indp = param.model_nparams +1:param.model_nparams + par.Nb;
+    Dw = zeros(par.Nb,length(theta));
+    for i = 1:par.Nb,
+        Dw(i,indp(i)) = 1;
     end
     
     % dH(theta)
@@ -243,6 +256,12 @@ function DE = NDE_win_sde(theta,param)
     ind22(dim+1:end) = 1;
     ind22 = logical(ind22);
     
+    
+    gf = @(x,par) nl_func(x,par,1);
+    Gf = @(x,par) nl_func(x,par,2);
+    g_u = @(x,par) nl_func(x,par,3);
+    g_u2 = @(x,par) nl_func(x,par,4);
+    
     for i=1:steps
         % Prediction of M and P
         M_prev = M;
@@ -276,7 +295,6 @@ function DE = NDE_win_sde(theta,param)
         end
         Pp = P;
 
-        
         % Update
         if mind(i) == 1
             IM = H*M;
@@ -301,11 +319,17 @@ function DE = NDE_win_sde(theta,param)
             
             par2 = par;
             for k = 1:length(theta),
-                par2.w = Dw(:,k);
-                dHM = dH(:,:,k)*Mp + H*dM(:,k);
-                dg = gf(Mp, par2) + dg_u.*dHM;
-                dGx = Gf(Mp, par2) + bsxfun(@times,dg_u2.*dHM,H) + ...
-                    bsxfun(@times,dg_u,dH(:,:,k)); % dGx_dtheta
+                if k <= param.model_nparams,
+                    dHM = dH(:,:,k)*Mp + H*dM(:,k);
+                    dg = dg_u.*dHM;
+                    dGx = bsxfun(@times,dg_u2.*dHM,H) + ...
+                    bsxfun(@times,dg_u,dH(:,:,k));
+                else
+                    par2.w = Dw(:,k);
+                    dg = gf(Mp, par2);
+                    dGx = Gf(Mp, par2); 
+                end
+                
                 dGxPGxt = dGx*Pp*Gx';
                 dS = Gx*dP(:,:,k)*Gx'+ DR(:,:,k) + dGxPGxt + dGxPGxt';
                 dK = dP(:,:,k)*GxtiS + (Pp*(-GxtiS*dS + dGx'))/S;

@@ -28,8 +28,8 @@ warning off
 %add to the path lfm and Laguerre model folders
 addpath(genpath('../lfm'),'../model','../sde_funcs');
 
-load('../datasets/data2nd_ex1.mat')
-y = sin(y); %Application of nonlinear function
+load('../datasets/data_ex1.mat')
+y = exp(y); %Application of nonlinear function
 Y = [y';uq'];
 
 % Number of time steps in the time series
@@ -83,6 +83,8 @@ if ki == 1
     lfm_param1.fixp_val = sigma;
     param.model_params = {lfm_param1};
     theta_lf = [lengthScale];
+    param.consGain = false;
+    param.Gain = .5*ones(1,N);
     % Initial guess for the parameters
     w0_lf = zeros(size(theta_lf));
 elseif ki == 2    
@@ -169,10 +171,15 @@ e_param.dt          = dt;
 e_param.ltr_ind     = ltr_ind;
 
 % Defining nonlinear static function at output
-e_param.g_func = @(x,H) sin(H*x);
-e_param.dg_dx_func = @(x,H) bsxfun(@times,cos(H*x),H);
-e_param.g_u = @(x) cos(x);
-e_param.g_u2 = @(x) -sin(x);
+% e_param.g_func = @(x,param) sin(x);
+% e_param.dg_func = @(x,param) cos(x);
+% e_param.d2g_func = @(x,param) -sin(x);
+
+e_param.g_func = @(x,param) exp(x);
+e_param.dg_func = @(x,param) exp(x);
+e_param.d2g_func = @(x,param) exp(x);
+
+e_param.nl_par = struct;
 
 % Prior for thetas
 theta_prior = cell(1,length(w0));
@@ -202,7 +209,10 @@ opt=optimset(opt,'LargeScale', 'off');
 opt=optimset(opt,'Display', 'iter');
 
 if do_optim == 1
-    w_opt = fminunc(@(ww) mydeal(e_func(ww), eg_func(ww)), w0', opt);
+    %w_opt = fminunc(@(ww) mydeal(e_func(ww), eg_func(ww)), w0', opt);
+
+    fun = @(ww) e_func(ww);
+    w_opt = fmincon(fun,w0',[],[],[],[],[],[],@gaincon,opt);
 else    
     w_opt = log(theta)';
 end
@@ -216,7 +226,7 @@ isteps = 5;
 tgrid2 = linspace(t_min,t_max,steps*isteps);
 e_param2 = e_param;
 e_param2.isteps = isteps;
-[E2,MM2,PP2,MS2,PS2] = ES_lti_sde(w_opt,e_param2);
+[E2,MM2,PP2,MS2,PS2] = ES_win_sde(w_opt,e_param2);
 
 %% Plotting estimates of output signals
 color1 = [0.7 0.7 0.7];
@@ -230,7 +240,7 @@ model = feval(model_func,theta_opt,param,0);
 H = model.H;
 
 nisteps = steps*isteps;
-MS2fi = H*MS2;
+MS2fi = e_param.g_func(H*MS2);
 
 PS2fi = zeros(N,nisteps);
 
