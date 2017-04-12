@@ -203,7 +203,7 @@ eg_func = @(w) DE_win_sde(w,e_param);
 
 mydeal = @(varargin)varargin{1:nargout};
 
-opt=optimset('GradObj','on');
+opt=optimset('GradObj','off');
 opt=optimset(opt,'TolX', 1e-3);
 opt=optimset(opt,'LargeScale', 'off');
 opt=optimset(opt,'Display', 'iter');
