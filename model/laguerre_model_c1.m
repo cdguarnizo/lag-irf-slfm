@@ -4,13 +4,13 @@
 %   model = laguerre_model(theta,param,calc_grad)
 % 
 % In:
-%        theta - Parameters (frequency f and magnitude q of process noise) 
+%        theta - Parameters (gamma and coefficients) 
 %        param - Number of harmonic components
 %    calc_grad - Should the gradients be calculated
 %     
 % Out:
-%        model - Structure containing the LTI model parameters and their
-%                derivatives wrt given parameter vector theta               
+%        model - Structure containing the LTI Laguerre model parameters and 
+%                their derivatives wrt given parameter vector theta               
 % 
 % Description:
 %
@@ -22,12 +22,13 @@
 %   where the latent forces u_r(t) have LTI SDE priors (augmented as a part
 %   of the joint state-space model).
 %
-% Copyright (C) 2011-2012 Jouni Hartikainen
+% Copyright (C) 2017 Cristian Guarnizo
+% Based on codes from Simo Sarkka, Jounin Hartikainen and Arno Solin
 %
 % This software is distributed under the GNU General Public 
 % Licence (version 2 or later); please refer to the file 
 % Licence.txt, included with the software, for details.
-function model = laguerre_model(theta,param,calc_grad)
+function model = laguerre_model_c1(theta,param,calc_grad)
 
     model = struct;
     G  = [];
@@ -41,9 +42,15 @@ function model = laguerre_model(theta,param,calc_grad)
     
     indp = 1:N;
     C = theta(indp);                    % Gamma of Laguerre functions
-    indp = indp(end)+1:indp(end)+D*N;
-    K = reshape(theta(indp),N,D);       % Laguerre coefficients
-
+    indp = indp(end)+1:indp(end)+(D-1)*(N);
+    K = reshape(theta(indp),N,D-1);       % Laguerre coefficients
+    K0 = zeros(N,1);
+    w = (-1).^(1:D-1);
+    for n = 1:N,
+        K0(n) = 1/sqrt(2/C(n)) - (K(n,:)*w');
+    end
+    K = [K0,K];
+    
     indp = indp(end)+1;
     indp_lf = indp;
 
@@ -159,11 +166,11 @@ function model = laguerre_model(theta,param,calc_grad)
         end
         
         % wrt K
-        indp = indp(end)+1:indp(end)+N*D;
-        indp = reshape(indp,N,D);
+        indp = indp(end)+1:indp(end)+N*(D-1);
+        indp = reshape(indp,N,D-1);
         for i = 1:N,
-            for d = 1:D,
-                DH(i,(i-1)*D+d,indp(i,d)) = 1.;
+            for d = 2:D,
+                DH(i,(i-1)*D+d,indp(i,d-1)) = 1.;
             end
         end       
         

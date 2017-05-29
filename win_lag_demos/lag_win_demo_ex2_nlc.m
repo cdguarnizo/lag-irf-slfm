@@ -225,17 +225,23 @@ eg_func = @(w) NDE_win_sde(w,e_param);
 mydeal = @(varargin)varargin{1:nargout};
 
 if do_optim == 1
-    opt=optimset('GradObj','on');
-    opt=optimset(opt,'TolX', 1e-3);
-    opt=optimset(opt,'LargeScale', 'off');
-    opt=optimset(opt,'Display', 'iter');
-    w_opt = fminunc(@(ww) mydeal(e_func(ww), eg_func(ww)), w0', opt);
-    
-%     opt=optimset('GradObj','off');
+%     opt=optimset('GradObj','on');
 %     opt=optimset(opt,'TolX', 1e-3);
 %     opt=optimset(opt,'LargeScale', 'off');
 %     opt=optimset(opt,'Display', 'iter');
-%     w_opt = fminunc(@(ww) e_func(ww), w0', opt);
+%     w_opt = fminunc(@(ww) mydeal(e_func(ww), eg_func(ww)), w0', opt);
+    
+    lb = -inf*ones(1,length(w0));
+    ub = inf*ones(1,length(w0));
+    lb(12) = -5;
+    ub(12) = 4;
+    
+    fun = @(ww) e_func(ww);
+    opt=optimset('GradObj','off');
+    opt=optimset(opt,'TolX', 1e-3);
+    opt=optimset(opt,'LargeScale', 'off');
+    opt=optimset(opt,'Display', 'iter'); 
+    w_opt = fmincon(fun,w0',[],[],[],[],lb,ub,@gaincon,opt);
 else    
     w_opt = log(theta)';
 end
@@ -346,11 +352,7 @@ for d=1:N,
     gamma = Gamma(d);
     c = C(d,:)';
     hres(d,:) = sum(repmat(c, 1,length(tgrid)).*EvalLag(tgrid, D, gamma), 1);
-    
-    %b0 = params(3);
-    %b1 = params(1);
-    %w = .5*sqrt(b1^2 - 4*b0);
-    %htrue = 1/w*exp(-.5*b1*tgrid).*sinh(w*tgrid);
+
     sys{d} = tf(1, params(d,:));
     htrue = impulse(sys{d},tgrid);
     figure;
@@ -367,7 +369,6 @@ for k = 1:length(x),
 end
 
 figure
-h1 = plot(x,fx,'--k');
+plot(x,fx)
 hold on
-h2 = plot(x,exp(x),'.k');
-legend([h1,h2],'Est. function','True function')
+plot(x,exp(x),'--r')

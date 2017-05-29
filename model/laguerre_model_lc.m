@@ -17,17 +17,18 @@
 %   Model structure for Laguerre approx. of latent force model (LFM) is 
 %   described by the equations for outputs x_i(t), i=1,...,N:
 % 
-%   A_i d2x_i(t)/dt^2 + C_i dx_i(t)/dt + K_i x(t) = sum_{r=1}^R S_{i,r} u_r(t)
+%   A_i d2x_i(t)/dt^2 + C_i dx_i(t)/dt + K_i x(t) = sum_{r=1}^R u_r(t)
 % 
 %   where the latent forces u_r(t) have LTI SDE priors (augmented as a part
-%   of the joint state-space model).
+%   of the joint state-space model). Additionally, coefficients are repara-
+%   metrizied as sqrt(2/gamma)c_i.
 %
 % Copyright (C) 2011-2012 Jouni Hartikainen
 %
 % This software is distributed under the GNU General Public 
 % Licence (version 2 or later); please refer to the file 
 % Licence.txt, included with the software, for details.
-function model = laguerre_model(theta,param,calc_grad)
+function model = laguerre_model_lc(theta,param,calc_grad)
 
     model = struct;
     G  = [];
@@ -42,15 +43,17 @@ function model = laguerre_model(theta,param,calc_grad)
     indp = 1:N;
     C = theta(indp);                    % Gamma of Laguerre functions
     indp = indp(end)+1:indp(end)+D*N;
-    K = reshape(theta(indp),N,D);       % Laguerre coefficients
+    Kp = reshape(theta(indp),N,D);       % Laguerre coefficients
 
+    K = bsxfun(@rdivide,Kp',sqrt(2./C(:)'))';
+    
     indp = indp(end)+1;
     indp_lf = indp;
 
     models = cell(1,length(model_funcs));
     nmodels = length(models);
     n = D*N;
-    for i = 1:nmodels      
+    for i = 1:nmodels, 
         models{i} = feval(model_funcs{i},theta(indp:end),model_params{i},1);
         indp = indp + size(models{i}.DF,3);        
         n = n + size(models{i}.F,1);
@@ -148,7 +151,7 @@ function model = laguerre_model(theta,param,calc_grad)
         % wrt C
         indp = 1:N;
         ind = 0;
-        for i = 1:N
+        for i = 1:N,
             ind = ind(end)+1:ind(end)+D;
             DF(ind,ind,indp(i)) = -2*(tril(ones(D,D),-1)) - diag(ones(1,D));
             indlf = N*D+1;
@@ -156,14 +159,19 @@ function model = laguerre_model(theta,param,calc_grad)
                 DF(ind, indlf, indp(i)) = .5*sqrt(2/C(i))*ones(D,1);
                 indlf = indlf + size(Hgps{r},2);
             end
+            cte = 2*sqrt(2*C(i));
+            for d = 1:D,
+                DH(i,(i-1)*D+d,indp(i)) = Kp(i,d)/cte;
+            end
         end
         
         % wrt K
         indp = indp(end)+1:indp(end)+N*D;
         indp = reshape(indp,N,D);
         for i = 1:N,
+            cte = sqrt(.5*C(i));
             for d = 1:D,
-                DH(i,(i-1)*D+d,indp(i,d)) = 1.;
+                DH(i,(i-1)*D+d,indp(i,d)) = cte;
             end
         end       
         

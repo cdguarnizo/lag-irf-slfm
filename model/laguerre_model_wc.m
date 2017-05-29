@@ -20,14 +20,16 @@
 %   A_i d2x_i(t)/dt^2 + C_i dx_i(t)/dt + K_i x(t) = sum_{r=1}^R S_{i,r} u_r(t)
 % 
 %   where the latent forces u_r(t) have LTI SDE priors (augmented as a part
-%   of the joint state-space model).
+%   of the joint state-space model). Additonally, this model includes a
+%   constrained based on weigthing all Laguerre's coefficients.
+%
 %
 % Copyright (C) 2011-2012 Jouni Hartikainen
 %
 % This software is distributed under the GNU General Public 
 % Licence (version 2 or later); please refer to the file 
 % Licence.txt, included with the software, for details.
-function model = laguerre_model(theta,param,calc_grad)
+function model = laguerre_model_wc(theta,param,calc_grad)
 
     model = struct;
     G  = [];
@@ -44,6 +46,20 @@ function model = laguerre_model(theta,param,calc_grad)
     indp = indp(end)+1:indp(end)+D*N;
     K = reshape(theta(indp),N,D);       % Laguerre coefficients
 
+    if isfield(param,'consGain') && param.consGain,
+        if ~isfield(param,'Gain'),
+            param.Gain = ones(1,N);
+        end
+        w = (-1).^((1:param.D) - 1);
+        Gain = zeros(1,param.N);
+        for d = 1:param.N,
+            Gain(d) = param.Gain(d)/(sqrt(2/C(d))*(w*K(d,:)'));
+        end
+    else
+        Gain = ones(1,param.N);
+    end
+    model.Gain = Gain;
+    
     indp = indp(end)+1;
     indp_lf = indp;
 
@@ -85,7 +101,7 @@ function model = laguerre_model(theta,param,calc_grad)
         % Building F
         F(ind,ind) = -(2*C(i))*(tril(ones(D,D),-1)) - C(i)*(diag(ones(1,D)));
         % Building H
-        H(i,ind) = K(i,:);
+        H(i,ind) = Gain(i)*K(i,:);
     end
 
     indlf = D*N;
@@ -163,7 +179,7 @@ function model = laguerre_model(theta,param,calc_grad)
         indp = reshape(indp,N,D);
         for i = 1:N,
             for d = 1:D,
-                DH(i,(i-1)*D+d,indp(i,d)) = 1.;
+                DH(i,(i-1)*D+d,indp(i,d)) = Gain(i);
             end
         end       
         

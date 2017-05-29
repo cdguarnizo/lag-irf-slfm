@@ -54,16 +54,6 @@ do_optim = 1;
 N = 1;
 % Number of coefficients
 D = 10;
-
-%Parameters and definitions for approx. g()
-% For each ouput we should have L_d, l_d, s_d
-L = 4;
-Nb = 10;
-ell = 1; %GP lenghtscale
-sf = 1; %GP variance
-S_eq = @(sf,ell,Nb) sf*sqrt(2*pi.*ell.^2)*exp(-.5*(ell*pi*(1:Nb)/(2*L)).^2);
-S = S_eq(sf,ell,Nb);
-
 % Prior covariance for the outputs 
 P0x = 1e-3*eye(N*D);
 
@@ -93,6 +83,8 @@ if ki == 1
     lfm_param1.fixp_val = sigma;
     param.model_params = {lfm_param1};
     theta_lf = [lengthScale];
+    param.consGain = true;
+    param.Gain = .5*ones(1,N);
     % Initial guess for the parameters
     w0_lf = zeros(size(theta_lf));
 elseif ki == 2    
@@ -129,24 +121,19 @@ elseif ki == 2
     w0_lf = zeros(size(theta_lf));
     w0_lf(2) = -3;
 end
-
-% Additional parameters for lag_model
 param.incInput = true;
-% Additional parameters for np nl
+param.fixS = true;
 
 Rtr = diag((0.01*var(Y')));
 
-% ind_t = tgrid>2. & tgrid<3.;
-% Y(1,ind_t) = NaN;
-% ind_t = tgrid>3. & tgrid<5.;
-% Y(2,ind_t) = NaN;
+%ind_t = tgrid>2. & tgrid<3.;
+%Y(1,ind_t) = NaN;
+%ind_t = tgrid>3. & tgrid<5.;
+%Y(2,ind_t) = NaN;
 
-%ell = 1; %GP lenghtscale
-%sf = 2; %GP variance
-
-%lambda = pi*in/(2*L);
-%S_eq = sf*sqrt(2*pi.*ell.^2)*exp(-.5*(ell*lambda).^2);
-%Wt = sqrt(S_eq)'.*randn(Nb,1);
+% Randomize the ODE parameters
+%Ct = rand(N,1);     %gamma
+%Kt = rand(N,D);    %coefficient
 
 w0 =randn(N + D*N,1);
 w0 = [w0;w0_lf];
@@ -160,7 +147,7 @@ n_param{2} = length(w0)+1:length(w0)+N;
 %theta = [theta;sqrt(diag(Rtr))];
 %w0 = [w0;-1*ones(size(H,1),1)];
 
-model_func  = @laguerre_model;
+model_func  = @laguerre_model_wc;
 model_param = param; 
 
 %theta_prior = prior_t('init');
@@ -183,32 +170,23 @@ e_param.dt          = dt;
 e_param.ltr_ind     = ltr_ind;
 
 % Defining nonlinear static function at output
-e_param.g_func = @(x, param) (param.L^(-1/2)*sin( pi*(1:param.Nb)*(x...
-    + param.L)/(2*param.L) )) * param.w(:);
-e_param.dg_func = @(x, param)  param.L^(-1/2)*( cos( pi*(1:param.Nb)*(x + ...
-    param.L)/(2*param.L) ).*(pi*(1:param.Nb)/(2*param.L)) )*param.w(:);
-e_param.d2g_func = @(x, param)  param.L^(-1/2)*( -sin( pi*(1:param.Nb)*...
-    (x + L)/(2*L) ).*(pi*(1:param.Nb)/(2*param.L)).^2 )*param.w(:);
+% e_param.g_func = @(x,param) sin(x);
+% e_param.dg_func = @(x,param) cos(x);
+% e_param.d2g_func = @(x,param) -sin(x);
+
+e_param.g_func = @(x,param) exp(x);
+e_param.dg_func = @(x,param) exp(x);
+e_param.d2g_func = @(x,param) exp(x);
 
 e_param.nl_par = struct;
-e_param.nl_par.Nb = Nb;
-e_param.nl_par.L = L;
-e_param.model_nparams = length(w0);
-w0 = [w0;randn(Nb,1)];
 
 % Prior for thetas
 theta_prior = cell(1,length(w0));
 
-for i = 1:e_param.model_nparams,
+for i = 1:length(w0)
     theta_prior{i} = prior_t;
     %theta_prior{i}.s2 = .3;
 end
-
-% Prior for weights of NP approx of g(H*X)
-for i = 1:Nb,
-    theta_prior{e_param.model_nparams+i} = prior_gaussian('s2',S(i));
-end
-
 e_param.e_prior = theta_prior;
 
 %% MAP optimization of parameters 
@@ -219,23 +197,29 @@ e_param.e_prior = theta_prior;
 % Function handles to energy function and its derivative
 
 % With fixed noise variance
-e_func = @(w) NE_win_sde(w,e_param);
-eg_func = @(w) NDE_win_sde(w,e_param);
+e_func = @(w) E_win_sde(w,e_param);
+eg_func = @(w) DE_win_sde(w,e_param);
 
 mydeal = @(varargin)varargin{1:nargout};
 
 if do_optim == 1
-    opt=optimset('GradObj','on');
-    opt=optimset(opt,'TolX', 1e-3);
-    opt=optimset(opt,'LargeScale', 'off');
-    opt=optimset(opt,'Display', 'iter');
-    w_opt = fminunc(@(ww) mydeal(e_func(ww), eg_func(ww)), w0', opt);
-    
-%     opt=optimset('GradObj','off');
+%     opt=optimset('GradObj','on');
 %     opt=optimset(opt,'TolX', 1e-3);
 %     opt=optimset(opt,'LargeScale', 'off');
-%     opt=optimset(opt,'Display', 'iter');
-%     w_opt = fminunc(@(ww) e_func(ww), w0', opt);
+%     opt=optimset(opt,'Display', 'iter'); 
+%     w_opt = fminunc(@(ww) mydeal(e_func(ww), eg_func(ww)), w0', opt);
+    
+    lb = -inf*ones(1,length(w0));
+    ub = inf*ones(1,length(w0));
+    lb(12) = -5;
+    ub(12) = 4;
+    
+    fun = @(ww) e_func(ww);
+    opt=optimset('GradObj','off');
+    opt=optimset(opt,'TolX', 1e-3);
+    opt=optimset(opt,'LargeScale', 'off');
+    opt=optimset(opt,'Display', 'iter'); 
+    w_opt = fmincon(fun,w0',[],[],[],[],lb,ub,[],opt);
 else    
     w_opt = log(theta)';
 end
@@ -249,7 +233,7 @@ isteps = 5;
 tgrid2 = linspace(t_min,t_max,steps*isteps);
 e_param2 = e_param;
 e_param2.isteps = isteps;
-[E2,MM2,PP2,MS2,PS2] = NES_win_sde(w_opt,e_param2);
+[E2,MM2,PP2,MS2,PS2] = ES_win_sde(w_opt,e_param2);
 
 %% Plotting estimates of output signals
 color1 = [0.7 0.7 0.7];
@@ -257,25 +241,19 @@ color2 = [1 0 0];
 color3 = [0 1 0];
 xx = tgrid'+dt;
 xx2 = tgrid2'+dt./isteps;
+
+model = feval(model_func,theta_opt,param,0);
+
+H = model.H;
+
 nisteps = steps*isteps;
+MS2fi = e_param.g_func(H*MS2);
 
-model = feval(model_func,theta_opt(1:e_param.model_nparams),param,0);
-
-par.w = theta_opt(e_param.model_nparams+1:end);
-par.L = L;
-par.Nb = Nb;
-
-MS2fi = model.H*MS2;
-xmin = min(MS2fi(1,:));
-xmax = max(MS2fi(1,:));
-for k = 1:size(MS2fi,2),
-    MS2fi(:,k) = e_param.g_func(MS2fi(1:e_param.model_param.N,k),par);
-end
 PS2fi = zeros(N,nisteps);
 
 for i1 = 1:N
     for i = 1:size(PS2,3)
-        PS2fi(i1,i) = model.H(i1,:)*PS2(:,:,i)*model.H(i1,:)';
+        PS2fi(i1,i) = H(i1,:)*PS2(:,:,i)*H(i1,:)';
     end
 end
 
@@ -285,7 +263,7 @@ for i = 1:N
         fliplr((MS2fi(i,:)-1.96*sqrt(PS2fi(i,:))))], color1, 'edgecolor',color1);
     hold on
     
-    h1 = plot(xx2,MS2fi(i,:),'--k','LineWidth',1);
+    h1=plot(xx2,MS2fi(i,:),'--k','LineWidth',1);
     h3 = plot(xx(mind==1),y','.r','LineWidth',1);
     h2 = plot(xx(mind==1),Y(i,:),'.k','LineWidth',1);
     %title(sprintf('Smoothed estimate of output %d',i))
@@ -344,30 +322,14 @@ Gamma = theta_opt(1:N);
 C = reshape(theta_opt(N+1:N+D*N),N,D);
 for d=1:N,
     gamma = Gamma(d);
-    c = C(d,:)';
+    c = C(d,:)'*model.Gain(d);
     hres(d,:) = sum(repmat(c, 1,length(tgrid)).*EvalLag(tgrid, D, gamma), 1);
     
-    %b0 = params(3);
-    %b1 = params(1);
-    %w = .5*sqrt(b1^2 - 4*b0);
-    %htrue = 1/w*exp(-.5*b1*tgrid).*sinh(w*tgrid);
     sys{d} = tf(1, params(d,:));
     htrue = impulse(sys{d},tgrid);
     figure;
-    h1 = plot(tgrid,htrue,'--k','LineWidth',1);
+    h1 = plot(tgrid,hres(d,:),'.k','LineWidth',1);
     hold on
-    h2 = plot(tgrid,hres(d,:),'.k','LineWidth',1);
+    h2 = plot(tgrid,htrue,'--k','LineWidth',1);
 end
-legend([h2,h1],'MAP IRF','True IRF')
-
-x = xmin:(xmax-xmin)/100:xmax;
-fx = x;
-for k = 1:length(x),
-    fx(k) = e_param.g_func(x(k),par);
-end
-
-figure
-h1 = plot(x,fx,'--k');
-hold on
-h2 = plot(x,exp(x),'.k');
-legend([h1,h2],'Est. function','True function')
+legend([h1,h2],'MAP IRF','True IRF')

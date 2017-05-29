@@ -134,7 +134,6 @@ Rtr = diag((0.01*var(Y')));
 % Randomize the ODE parameters
 %Ct = rand(N,1);     %gamma
 %Kt = rand(N,D);    %coefficient
-%St = ones(N,nlf); %sensitivities
 
 w0 =randn(N + D*N + N*nlf,1);
 w0 = [w0;w0_lf];

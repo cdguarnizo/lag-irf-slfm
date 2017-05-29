@@ -100,13 +100,6 @@ function E = E_win_sde(theta,param)
     end
     steps = size(mind,2);
     
-%     cte = sqrt(2/theta(1));
-%     indcof = model_param.N + 1:model_param.N + model_param.D;
-%     cof = theta(indcof);
-%     w = (-1).^((1:model_param.D) - 1.);
-%     b = .5/(cte*cof*w')
-%     theta(indcof) = b*theta(indcof);
-    
     % LTI SDE model parameters
     model = feval(model_func,theta,model_param,0);
     F  = model.F;

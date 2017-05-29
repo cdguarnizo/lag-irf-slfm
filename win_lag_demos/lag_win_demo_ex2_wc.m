@@ -25,6 +25,9 @@ clc
 clear
 close all
 warning off
+
+rng(106,'twister') %105
+
 %add to the path lfm and Laguerre model folders
 addpath(genpath('../lfm'),'../model','../sde_funcs');
 
@@ -93,6 +96,8 @@ if ki == 1
     lfm_param1.fixp_val = sigma;
     param.model_params = {lfm_param1};
     theta_lf = [lengthScale];
+    param.consGain = true;
+    param.Gain = ones(1,N);
     % Initial guess for the parameters
     w0_lf = zeros(size(theta_lf));
 elseif ki == 2    
@@ -160,7 +165,7 @@ n_param{2} = length(w0)+1:length(w0)+N;
 %theta = [theta;sqrt(diag(Rtr))];
 %w0 = [w0;-1*ones(size(H,1),1)];
 
-model_func  = @laguerre_model;
+model_func  = @laguerre_model_wc;
 model_param = param; 
 
 %theta_prior = prior_t('init');
@@ -225,17 +230,24 @@ eg_func = @(w) NDE_win_sde(w,e_param);
 mydeal = @(varargin)varargin{1:nargout};
 
 if do_optim == 1
-    opt=optimset('GradObj','on');
-    opt=optimset(opt,'TolX', 1e-3);
-    opt=optimset(opt,'LargeScale', 'off');
-    opt=optimset(opt,'Display', 'iter');
-    w_opt = fminunc(@(ww) mydeal(e_func(ww), eg_func(ww)), w0', opt);
-    
-%     opt=optimset('GradObj','off');
+%     opt=optimset('GradObj','on');
 %     opt=optimset(opt,'TolX', 1e-3);
 %     opt=optimset(opt,'LargeScale', 'off');
 %     opt=optimset(opt,'Display', 'iter');
-%     w_opt = fminunc(@(ww) e_func(ww), w0', opt);
+%     w_opt = fminunc(@(ww) mydeal(e_func(ww), eg_func(ww)), w0', opt);
+    
+    lb = -inf*ones(1,length(w0));
+    ub = inf*ones(1,length(w0));
+
+    lb(12) = -5;
+    ub(12) = 4;
+    
+    fun = @(ww) e_func(ww);
+    opt=optimset('GradObj','off');
+    opt=optimset(opt,'TolX', 1e-3);
+    opt=optimset(opt,'LargeScale', 'off');
+    opt=optimset(opt,'Display', 'iter'); 
+    w_opt = fmincon(fun,w0',[],[],[],[],lb,ub,[],opt);
 else    
     w_opt = log(theta)';
 end
@@ -344,13 +356,9 @@ Gamma = theta_opt(1:N);
 C = reshape(theta_opt(N+1:N+D*N),N,D);
 for d=1:N,
     gamma = Gamma(d);
-    c = C(d,:)';
+    c = C(d,:)'*model.Gain(d);
     hres(d,:) = sum(repmat(c, 1,length(tgrid)).*EvalLag(tgrid, D, gamma), 1);
-    
-    %b0 = params(3);
-    %b1 = params(1);
-    %w = .5*sqrt(b1^2 - 4*b0);
-    %htrue = 1/w*exp(-.5*b1*tgrid).*sinh(w*tgrid);
+
     sys{d} = tf(1, params(d,:));
     htrue = impulse(sys{d},tgrid);
     figure;
